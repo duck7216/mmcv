@@ -10,13 +10,13 @@ from mmcv.utils import TORCH_VERSION, _BatchNorm, digit_version
 from ..dist_utils import allreduce_grads
 from ..fp16_utils import LossScaler, wrap_fp16_model
 from .hook import HOOKS, Hook
-
-try:
-    # If PyTorch version >= 1.6.0, torch.cuda.amp.GradScaler would be imported
-    # and used; otherwise, auto fp16 will adopt mmcv's implementation.
-    from torch.cuda.amp import GradScaler
-except ImportError:
-    pass
+from torch.npu.amp import GradScaler
+# try:
+#     # If PyTorch version >= 1.6.0, torch.cuda.amp.GradScaler would be imported
+#     # and used; otherwise, auto fp16 will adopt mmcv's implementation.
+#     from torch.cuda.amp import GradScaler
+# except ImportError:
+#     pass
 
 
 @HOOKS.register_module()
@@ -53,7 +53,10 @@ class OptimizerHook(Hook):
         runner.optimizer.zero_grad()
         if self.detect_anomalous_params:
             self.detect_anomalous_parameters(runner.outputs['loss'], runner)
+        # dck_caution_here
         runner.outputs['loss'].backward()
+        # with amp.scale_loss(runner.outputs['loss'], runner.optimizer) as scaled_loss:
+        #     scaled_loss.backward()
 
         if self.grad_clip is not None:
             grad_norm = self.clip_grads(runner.model.parameters())

@@ -302,6 +302,8 @@ def batched_nms(boxes, scores, idxs, nms_cfg, class_agnostic=False):
         - keep (Tensor): The indices of remaining boxes in input
           boxes.
     """
+
+    
     # skip nms when nms_cfg is None
     if nms_cfg is None:
         scores, inds = scores.sort(descending=True)

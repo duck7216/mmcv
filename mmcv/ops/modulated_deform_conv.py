@@ -2,6 +2,7 @@
 import math
 
 import torch
+import torch_npu
 import torch.nn as nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
@@ -10,6 +11,8 @@ from torch.nn.modules.utils import _pair, _single
 from mmcv.utils import deprecated_api_warning
 from ..cnn import CONV_LAYERS
 from ..utils import ext_loader, print_log
+from torch_npu.contrib.module.deform_conv import ModulatedDeformConv2dFunction as ModulatedDeformConv2dFunctionNpu
+
 
 ext_module = ext_loader.load_ext(
     '_ext',
@@ -154,7 +157,7 @@ class ModulatedDeformConv2dFunction(Function):
 modulated_deform_conv2d = ModulatedDeformConv2dFunction.apply
 
 
-class ModulatedDeformConv2d(nn.Module):
+class ModulatedDeformConv2dSrc(nn.Module):
 
     @deprecated_api_warning({'deformable_groups': 'deform_groups'},
                             cls_name='ModulatedDeformConv2d')
@@ -168,7 +171,7 @@ class ModulatedDeformConv2d(nn.Module):
                  groups=1,
                  deform_groups=1,
                  bias=True):
-        super(ModulatedDeformConv2d, self).__init__()
+        super(ModulatedDeformConv2dSrc, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = _pair(kernel_size)
@@ -205,9 +208,62 @@ class ModulatedDeformConv2d(nn.Module):
                                        self.dilation, self.groups,
                                        self.deform_groups)
 
+class ModulatedDeformConv2d(ModulatedDeformConv2dSrc):
+    def __init__(self, *args, **kwargs):
+        super(ModulatedDeformConv2d, self).__init__(*args, **kwargs)
+        self.created = False
+    
+    def create_var_for_npu(self):
+        if self.created:
+            return 
+        self.created = True
+        self.split_num = self.deform_groups * 2 * self.kernel_size[0] * self.kernel_size[1]
+        sort_index_for_npu = list(range(self.split_num))
+        sort_index_for_npu_fp = sort_index_for_npu[1::2] + sort_index_for_npu[::2]
+        sort_index_for_npu_bp_dict = {i: idx for idx, i in enumerate(sort_index_for_npu_fp)}
+        sort_index_for_npu_bp = [sort_index_for_npu_bp_dict[i] for i in sort_index_for_npu]
+        self.sort_index_for_npu_fp = torch.IntTensor(sort_index_for_npu_fp)
+        self.sort_index_for_npu_bp = torch.IntTensor(sort_index_for_npu_bp)
+        self.sort_index_for_npu_todevice = False
+        if self.bias is None:
+            self.bias = nn.Parameter(torch.zeros(self.weight.shape[0]))
+            self.with_bias = False
 
-@CONV_LAYERS.register_module('DCNv2')
-class ModulatedDeformConv2dPack(ModulatedDeformConv2d):
+    def npu(self, device=None):
+        self.create_var_for_npu()
+        return super(ModulatedDeformConv2d, self).npu(device)
+    
+    def to(self, *args, **kwargs):
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
+        if device is not None:
+            if "npu" in device.type:
+                self.create_var_for_npu()
+        return super(ModulatedDeformConv2d, self).to(*args, **kwargs)
+
+    def forward(self, x, offset, mask):
+        if "npu" in x.device.type:
+            out = self.conv_offset(x)
+            offset = out[:, :self.split_num, ...]
+            mask = torch.sigmoid(out[:, self.split_num:, ...])
+
+            if not self.sort_index_for_npu_todevice:
+                self.sort_index_for_npu_fp = self.sort_index_for_npu_fp.to(x.device)
+                self.sort_index_for_npu_bp = self.sort_index_for_npu_bp.to(x.device)
+                self.bias = self.bias.to(x.device)
+                self.sort_index_for_npu_todevice = True
+
+            return ModulatedDeformConv2dFunctionNpu.apply(
+                x, offset, mask, self.weight, self.bias, self.with_bias,
+                self.stride[0], self.padding[0], self.dilation[0],
+                self.groups, self.deform_groups,
+                self.sort_index_for_npu_fp,
+                self.sort_index_for_npu_bp,
+            )
+        else:
+            return super(ModulatedDeformConv2d, self).forward(x)
+    
+
+class ModulatedDeformConv2dPackSrc(ModulatedDeformConv2dSrc):
     """A ModulatedDeformable Conv Encapsulation that acts as normal Conv
     layers.
 
@@ -227,7 +283,7 @@ class ModulatedDeformConv2dPack(ModulatedDeformConv2d):
     _version = 2
 
     def __init__(self, *args, **kwargs):
-        super(ModulatedDeformConv2dPack, self).__init__(*args, **kwargs)
+        super(ModulatedDeformConv2dPackSrc, self).__init__(*args, **kwargs)
         self.conv_offset = nn.Conv2d(
             self.in_channels,
             self.deform_groups * 3 * self.kernel_size[0] * self.kernel_size[1],
@@ -239,7 +295,7 @@ class ModulatedDeformConv2dPack(ModulatedDeformConv2d):
         self.init_weights()
 
     def init_weights(self):
-        super(ModulatedDeformConv2dPack, self).init_weights()
+        super(ModulatedDeformConv2dPackSrc, self).init_weights()
         if hasattr(self, 'conv_offset'):
             self.conv_offset.weight.data.zero_()
             self.conv_offset.bias.data.zero_()
@@ -281,3 +337,83 @@ class ModulatedDeformConv2dPack(ModulatedDeformConv2d):
         super()._load_from_state_dict(state_dict, prefix, local_metadata,
                                       strict, missing_keys, unexpected_keys,
                                       error_msgs)
+
+@CONV_LAYERS.register_module('DCNv2')
+class ModulatedDeformConv2dPack(ModulatedDeformConv2dPackSrc):
+    """A ModulatedDeformable Conv Encapsulation that acts as normal Conv
+    layers.
+
+    Args:
+        in_channels (int): Same as nn.Conv2d.
+        out_channels (int): Same as nn.Conv2d.
+        kernel_size (int or tuple[int]): Same as nn.Conv2d.
+        stride (int): Same as nn.Conv2d, while tuple is not supported.
+        padding (int): Same as nn.Conv2d, while tuple is not supported.
+        dilation (int): Same as nn.Conv2d, while tuple is not supported.
+        groups (int): Same as nn.Conv2d.
+        bias (bool or str): If specified as `auto`, it will be decided by the
+            norm_cfg. Bias will be set as True if norm_cfg is None, otherwise
+            False.
+    """
+
+    _version = 2
+
+    def __init__(self, *args, **kwargs):
+        super(ModulatedDeformConv2dPack, self).__init__(*args, **kwargs)
+        self.created = False
+    def create_var_for_npu(self):
+        if self.created:
+            return 
+        self.created = True
+        self.split_num = self.deform_groups * 2 * self.kernel_size[0] * self.kernel_size[1]
+        sort_index_for_npu = list(range(self.split_num))
+        sort_index_for_npu_fp = sort_index_for_npu[1::2] + sort_index_for_npu[::2]
+        sort_index_for_npu_bp_dict = {i: idx for idx, i in enumerate(sort_index_for_npu_fp)}
+        sort_index_for_npu_bp = [sort_index_for_npu_bp_dict[i] for i in sort_index_for_npu]
+        self.sort_index_for_npu_fp = torch.IntTensor(sort_index_for_npu_fp)
+        self.sort_index_for_npu_bp = torch.IntTensor(sort_index_for_npu_bp)
+        self.sort_index_for_npu_todevice = False
+        if self.bias is None:
+            self.bias = nn.Parameter(torch.zeros(self.weight.shape[0]))
+            self.with_bias = False
+
+    def npu(self, device=None):
+        self.create_var_for_npu()
+        return super(ModulatedDeformConv2dPack, self).npu(device)
+    
+    def to(self, *args, **kwargs):
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
+        if device is not None:
+            if "npu" in device.type:
+                self.create_var_for_npu()
+        return super(ModulatedDeformConv2dPack, self).to(*args, **kwargs)
+
+    def forward(self, x):
+        if "npu" in x.device.type:
+            out = self.conv_offset(x)
+            offset = out[:, :self.split_num, ...]
+            mask = torch.sigmoid(out[:, self.split_num:, ...])
+
+            if not self.sort_index_for_npu_todevice:
+                self.sort_index_for_npu_fp = self.sort_index_for_npu_fp.to(x.device)
+                self.sort_index_for_npu_bp = self.sort_index_for_npu_bp.to(x.device)
+                self.bias = self.bias.to(x.device)
+                self.sort_index_for_npu_todevice = True
+
+            return ModulatedDeformConv2dFunctionNpu.apply(
+                x, offset, mask, self.weight, self.bias, self.with_bias,
+                self.stride[0], self.padding[0], self.dilation[0],
+                self.groups, self.deform_groups,
+                self.sort_index_for_npu_fp,
+                self.sort_index_for_npu_bp,
+            )
+        else:
+            return super(ModulatedDeformConv2dPack, self).forward(x)
+        # out = self.conv_offset(x)
+        # o1, o2, mask = torch.chunk(out, 3, dim=1)
+        # offset = torch.cat((o1, o2), dim=1)
+        # mask = torch.sigmoid(mask)
+        # return modulated_deform_conv2d(x, offset, mask, self.weight, self.bias,
+        #                                self.stride, self.padding,
+        #                                self.dilation, self.groups,
+        #                                self.deform_groups)
