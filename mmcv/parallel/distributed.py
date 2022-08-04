@@ -111,16 +111,17 @@ class MMDistributedDataParallel(DistributedDataParallel):
                     and self.require_forward_param_sync):
                 self._sync_params()
 
-        if self.device_ids:
-            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
-            if len(self.device_ids) == 1:
-                output = self.module.val_step(*inputs[0], **kwargs[0])
-            else:
-                outputs = self.parallel_apply(
-                    self._module_copies[:len(inputs)], inputs, kwargs)
-                output = self.gather(outputs, self.output_device)
-        else:
-            output = self.module.val_step(*inputs, **kwargs)
+        # if self.device_ids:
+        #     inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+        #     if len(self.device_ids) == 1:
+        #         output = self.module.val_step(*inputs[0], **kwargs[0])
+        #     else:
+        #         outputs = self.parallel_apply(
+        #             self._module_copies[:len(inputs)], inputs, kwargs)
+        #         output = self.gather(outputs, self.output_device)
+        # else:
+        inputs, kwargs = self.scatter(inputs, kwargs, [-1])
+        output = self.module.val_step(*inputs, **kwargs)
 
         if ('parrots' not in TORCH_VERSION
                 and digit_version(TORCH_VERSION) >= digit_version('1.11.0')):
