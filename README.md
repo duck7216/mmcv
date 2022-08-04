@@ -28,6 +28,51 @@
 
 English | [简体中文](README_zh-CN.md)
 
+## MMCV-NPU
+
+安装方式
+
+```
+git clone -b mmcv-npu https://github.com/duck7216/mmcv.git
+cd mmcv
+export MMCV_WITH_OPS=1
+export MAX_JOBS=8
+python3 setup.py build_ext
+python3 setup.py develop
+```
+
+#### 混合精度mmcv
+
+使用方式：在configs文件中加入以下代码
+
+```
+fp16 = dict(loss_scale=128.0)
+```
+
+其中，loss_scale可以设置为`'dynamic'`
+
+#### 融合优化器(Apex)
+
+如果使用Apex来实现混合精度，那么可以直接修改configs文件来调用融合优化器；如果是使用mmcv的混合精度，那么融合优化器不可用。
+
+以SGD为例，下面是mmdet某个模型中configs代码：
+
+```
+optimizer = dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0005)
+```
+
+如果想要使用融合优化器，可以修改为以下代码：
+
+```
+optimizer = dict(type='NpuFusedSGD', lr=0.01, momentum=0.9, weight_decay=0.0005)
+```
+
+#### 设置指定NPU
+
+如果使用DDP进行训练，且想要使用八卡中的两张卡或者四张卡，那么可以通过设置`NPUID`来指定起始卡。举例来说，如果想要使用编号为0-7的6,7号卡，那么可以设置`export NPUID=6`，`export RANK_SIZE=2`来实现上述操作。
+
+
+
 ## Introduction
 
 MMCV is a foundational library for computer vision research and supports many

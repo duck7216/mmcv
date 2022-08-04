@@ -55,6 +55,8 @@ def get_input_device(input):
                 return input_device
         return -1
     elif isinstance(input, torch.Tensor):
+        if input.is_npu:
+            return 2
         return input.get_device() if input.is_cuda else -1
     else:
         raise Exception(f'Unknown type {type(input)}.')

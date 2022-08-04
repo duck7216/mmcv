@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import torch
 import torch.nn as nn
-
+import torch_npu
 from mmcv.runner.fp16_utils import auto_fp16, cast_tensor_type, force_fp32
 
 
@@ -99,9 +99,9 @@ def test_auto_fp16():
     assert output_x.dtype == torch.half
     assert output_y.dtype == torch.half
 
-    if torch.cuda.is_available():
-        model.cuda()
-        output_x, output_y = model(input_x.cuda(), input_y.cuda())
+    if torch.npu.is_available():
+        model.npu()
+        output_x, output_y = model(input_x.npu(), input_y.npu())
         assert output_x.dtype == torch.half
         assert output_y.dtype == torch.half
 
@@ -124,9 +124,9 @@ def test_auto_fp16():
     assert output_x.dtype == torch.half
     assert output_y.dtype == torch.float32
 
-    if torch.cuda.is_available():
-        model.cuda()
-        output_x, output_y = model(input_x.cuda(), input_y.cuda())
+    if torch.npu.is_available():
+        model.npu()
+        output_x, output_y = model(input_x.npu(), input_y.npu())
         assert output_x.dtype == torch.half
         assert output_y.dtype == torch.float32
 
@@ -152,10 +152,10 @@ def test_auto_fp16():
     assert output_y.dtype == torch.half
     assert output_z.dtype == torch.float32
 
-    if torch.cuda.is_available():
-        model.cuda()
+    if torch.npu.is_available():
+        model.npu()
         output_x, output_y, output_z = model(
-            input_x.cuda(), y=input_y.cuda(), z=input_z.cuda())
+            input_x.npu(), y=input_y.npu(), z=input_z.npu())
         assert output_x.dtype == torch.half
         assert output_y.dtype == torch.half
         assert output_z.dtype == torch.float32
@@ -182,10 +182,10 @@ def test_auto_fp16():
     assert output_y.dtype == torch.float32
     assert output_z.dtype == torch.float32
 
-    if torch.cuda.is_available():
-        model.cuda()
+    if torch.npu.is_available():
+        model.npu()
         output_x, output_y, output_z = model(
-            input_x.cuda(), y=input_y.cuda(), z=input_z.cuda())
+            input_x.npu(), y=input_y.npu(), z=input_z.npu())
         assert output_x.dtype == torch.float32
         assert output_y.dtype == torch.float32
         assert output_z.dtype == torch.float32
@@ -225,9 +225,9 @@ def test_force_fp32():
     assert output_x.dtype == torch.float32
     assert output_y.dtype == torch.float32
 
-    if torch.cuda.is_available():
-        model.cuda()
-        output_x, output_y = model(input_x.cuda(), input_y.cuda())
+    if torch.npu.is_available():
+        model.npu()
+        output_x, output_y = model(input_x.npu(), input_y.npu())
         assert output_x.dtype == torch.float32
         assert output_y.dtype == torch.float32
 
@@ -250,9 +250,9 @@ def test_force_fp32():
     assert output_x.dtype == torch.float32
     assert output_y.dtype == torch.half
 
-    if torch.cuda.is_available():
-        model.cuda()
-        output_x, output_y = model(input_x.cuda(), input_y.cuda())
+    if torch.npu.is_available():
+        model.npu()
+        output_x, output_y = model(input_x.npu(), input_y.npu())
         assert output_x.dtype == torch.float32
         assert output_y.dtype == torch.half
 
@@ -278,10 +278,10 @@ def test_force_fp32():
     assert output_y.dtype == torch.float32
     assert output_z.dtype == torch.half
 
-    if torch.cuda.is_available():
-        model.cuda()
+    if torch.npu.is_available():
+        model.npu()
         output_x, output_y, output_z = model(
-            input_x.cuda(), y=input_y.cuda(), z=input_z.cuda())
+            input_x.npu(), y=input_y.npu(), z=input_z.npu())
         assert output_x.dtype == torch.float32
         assert output_y.dtype == torch.float32
         assert output_z.dtype == torch.half
@@ -308,10 +308,13 @@ def test_force_fp32():
     assert output_y.dtype == torch.half
     assert output_z.dtype == torch.half
 
-    if torch.cuda.is_available():
-        model.cuda()
+    if torch.npu.is_available():
+        model.npu()
         output_x, output_y, output_z = model(
-            input_x.cuda(), y=input_y.cuda(), z=input_z.cuda())
+            input_x.npu(), y=input_y.npu(), z=input_z.npu())
         assert output_x.dtype == torch.half
         assert output_y.dtype == torch.half
         assert output_z.dtype == torch.half
+test_cast_tensor_type()
+test_force_fp32()
+test_auto_fp16()

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+import torch_npu
 import torch.nn as nn
 from torch.nn.parallel import DataParallel, DistributedDataParallel
 
@@ -81,14 +82,14 @@ def test_get_input_device():
     assert get_input_device(inputs) == -1
 
     # if the device is GPU, return the index of device
-    if torch.cuda.is_available():
-        input = torch.zeros([1, 3, 3, 3]).cuda()
-        assert get_input_device(input) == 0
+    if torch.npu.is_available():
+        input = torch.zeros([1, 3, 3, 3]).npu()
+        assert get_input_device(input) == 2
         inputs = [
-            torch.zeros([1, 3, 3, 3]).cuda(),
-            torch.zeros([1, 4, 4, 4]).cuda()
+            torch.zeros([1, 3, 3, 3]).npu(),
+            torch.zeros([1, 4, 4, 4]).npu()
         ]
-        assert get_input_device(inputs) == 0
+        assert get_input_device(inputs) == 2
 
     # input should be a tensor or list of tensor
     with pytest.raises(Exception):
@@ -107,15 +108,15 @@ def test_scatter():
         assert torch.allclose(input, output)
 
     # if the device is GPU, copy the input from CPU to GPU
-    if torch.cuda.is_available():
+    if torch.npu.is_available():
         input = torch.zeros([1, 3, 3, 3])
         output = scatter(input=input, devices=[0])
-        assert torch.allclose(input.cuda(), output)
+        assert torch.allclose(input.npu(), output)
 
         inputs = [torch.zeros([1, 3, 3, 3]), torch.zeros([1, 4, 4, 4])]
         outputs = scatter(input=inputs, devices=[0])
         for input, output in zip(inputs, outputs):
-            assert torch.allclose(input.cuda(), output)
+            assert torch.allclose(input.npu(), output)
 
     # input should be a tensor or list of tensor
     with pytest.raises(Exception):
@@ -128,26 +129,31 @@ def test_Scatter():
     input = torch.zeros([1, 3, 3, 3])
     outputs = Scatter.forward(target_gpus, input)
     assert isinstance(outputs, tuple)
-    assert torch.allclose(input, outputs[0])
+    assert torch.allclose(input.npu(), outputs[0])
 
     target_gpus = [-1]
     inputs = [torch.zeros([1, 3, 3, 3]), torch.zeros([1, 4, 4, 4])]
     outputs = Scatter.forward(target_gpus, inputs)
     assert isinstance(outputs, tuple)
     for input, output in zip(inputs, outputs):
-        assert torch.allclose(input, output)
+        assert torch.allclose([input.npu() for input in inputs], output)
 
     # if the device is GPU, copy the input from CPU to GPU
-    if torch.cuda.is_available():
+    if torch.npu.is_available():
         target_gpus = [0]
         input = torch.zeros([1, 3, 3, 3])
         outputs = Scatter.forward(target_gpus, input)
         assert isinstance(outputs, tuple)
-        assert torch.allclose(input.cuda(), outputs[0])
+        assert torch.allclose(input.npu(), outputs[0])
 
         target_gpus = [0]
         inputs = [torch.zeros([1, 3, 3, 3]), torch.zeros([1, 4, 4, 4])]
         outputs = Scatter.forward(target_gpus, inputs)
         assert isinstance(outputs, tuple)
         for input, output in zip(inputs, outputs):
-            assert torch.allclose(input.cuda(), output[0])
+            assert torch.allclose(input.npu(), output[0])
+
+test_get_input_device()
+test_Scatter()
+test_scatter()
+test_is_module_wrapper()
