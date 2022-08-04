@@ -26,6 +26,55 @@ class MMDistributedDataParallel(DistributedDataParallel):
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
+    def forward(self, *inputs, **kwargs):
+        """train_step() API for module wrapped by DistributedDataParallel.
+
+        This method is basically the same as
+        ``DistributedDataParallel.forward()``, while replacing
+        ``self.module.forward()`` with ``self.module.train_step()``.
+        It is compatible with PyTorch 1.1 - 1.5.
+        """
+
+        # In PyTorch >= 1.7, ``reducer._rebuild_buckets()`` is moved from the
+        # end of backward to the beginning of forward.
+        if ('parrots' not in TORCH_VERSION
+                and digit_version(TORCH_VERSION) >= digit_version('1.7')
+                and self.reducer._rebuild_buckets()):
+            print_log(
+                'Reducer buckets have been rebuilt in this iteration.',
+                logger='mmcv')
+
+        if ('parrots' not in TORCH_VERSION
+                and digit_version(TORCH_VERSION) >= digit_version('1.11.0')):
+            if self._check_sync_bufs_pre_fwd():
+                self._sync_buffers()
+        else:
+            if (getattr(self, 'require_forward_param_sync', False)
+                    and self.require_forward_param_sync):
+                self._sync_params()
+
+        inputs, kwargs = self.scatter(inputs, kwargs, [-1])
+        output = self.module(*inputs[0], **kwargs[0])
+
+        if ('parrots' not in TORCH_VERSION
+                and digit_version(TORCH_VERSION) >= digit_version('1.11.0')):
+            if self._check_sync_bufs_post_fwd():
+                self._sync_buffers()
+
+        if (torch.is_grad_enabled()
+                and getattr(self, 'require_backward_grad_sync', False)
+                and self.require_backward_grad_sync):
+            if self.find_unused_parameters:
+                self.reducer.prepare_for_backward(list(_find_tensors(output)))
+            else:
+                self.reducer.prepare_for_backward([])
+        else:
+            if ('parrots' not in TORCH_VERSION
+                    and digit_version(TORCH_VERSION) > digit_version('1.2')):
+                self.require_forward_param_sync = False
+        return output
+
+
     def train_step(self, *inputs, **kwargs):
         """train_step() API for module wrapped by DistributedDataParallel.
 
