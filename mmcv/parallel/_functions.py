@@ -22,7 +22,6 @@ def scatter(input, devices, streams=None):
         if devices != [-1]:
             with torch.cuda.device(devices[0]), torch.cuda.stream(stream):
                 output = output.cuda(devices[0], non_blocking=True)
-        # dck_caution_here
         else:
             output = input.npu(non_blocking=True)
         return output
